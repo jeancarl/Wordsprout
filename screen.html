@@ -1,0 +1,238 @@
+<!-- Filename: screen.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="description" content="">
+  <meta name="author" content="">
+
+  <title>wordsprout</title>
+  <link href="http//fonts.googleapis.com/css?family=Lato:100italic,100,300italic,300,400italic,400,700italic,700,900italic,900" rel="stylesheet" type="text/css">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/ladda-bootstrap/0.9.4/ladda-themeless.min.css">
+  
+  <!-- JQuery and Bootstrap are used in this example, but not required -->
+  <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.4/js/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ladda-bootstrap/0.9.4/spin.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ladda-bootstrap/0.9.4/ladda.min.js"></script>
+</head>
+<body>
+<div><img src="wordsprout.png" style="max-height:60px"></div>
+
+<div class="title">Points: <span style="padding:5px 20px; margin-left:30px; border:1px solid white" id="score">0</span></div>
+
+<div class="word-text hide">
+  <div class="instr" style="font-size: 30pt">Spell the word you hear.</div>
+  <div class="instr hide" id='correct-word' style="font-size: 70pt; margin-top: 50px"></div>
+</div>
+
+<div class="word-pic">
+  <div class="instr" id="word">Compose a word:</div>
+  <div class=""><img id='pictoshow' src="" style="max-height: 500px"></div>
+</div>
+  
+ <div class="jumbotron">
+    <div class="container">
+      <button type="button" class="btn btn-default pull-right" id="closeApp">Close</button>
+      <p><button id="init" class="btn btn-primary btn-lg ladda-button" data-style="expand-right" onclick="initialize();">
+        <span class="ladda-label">Initialize Object Tracking</span></button>
+        <button id="button1" class="btn btn-primary btn-lg ladda-button" data-style="expand-right" onclick="addImages();">
+        <span class="ladda-label">Add Training Images</span></button> <button id="button2" class="btn btn-primary btn-lg ladda-button" data-style="expand-right" onclick="start();">
+        <span class="ladda-label">Start Tracking</span></button> <button id="button3" class="btn btn-primary btn-lg ladda-button" data-style="expand-right" onclick="stop();">
+        <span class="ladda-label">Stop Tracking</span></button></p>
+				Representation: <input type="text" id="letter" />
+    </div>
+  </div>
+ 
+  <div class="modal fade hide" id="codeTracking" tabindex="-1" role="dialog" aria-labelledby="codeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+      <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+      <h4 class="modal-title" id="codeModalLabel">Code for Object Tracking</h4>
+      </div>
+      <pre class="modal-body" id="code_tracking">
+      </pre>
+      
+      <div class="modal-footer">
+      <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="alert alert-danger alert-dismissible fade in" role="alert" id="capture_error">
+      <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+      <p id="error_message"></p>
+    </div>
+    <div class="row text-center">
+      <h3 id="tracked-heading">Object Data</h3>
+      <div id="outline-result" class="bg-info"></div>
+    </div>
+  </div>
+  <audio controls preload="auto" id="audio">
+    <source id="wavsource" type="audio/wav" />
+  </audio>
+<div id="message" style="font-size:36pt; text-align:center"></div>   
+<script>
+  var sprout = require('sprout');
+  var wordnet = require('wordnet');
+  var async = require('async');
+  var responseAnswer = '';
+  var score = 0;
+  var IBM_TEXT_TO_SPEECH_ENDPOINT = 'http://0.0.0.0:8080/api/speak?text=';
+
+  window.checkAnswer = function() {    
+    wordnet.lookup(responseAnswer, function(err, definitions) {
+      if(definitions) {
+        score++;
+        
+        $('#score').text(score);
+        $('#pictoshow').attr('src', 'objects/'+responseAnswer);
+
+        document.getElementById('wavsource').src = IBM_TEXT_TO_SPEECH_ENDPOINT+encodeURIComponent(responseAnswer);
+        document.getElementById('audio').load();
+        document.getElementById('audio').play();
+      } else {
+        $('#message').text('incorrect');   
+      }
+    });      
+  };
+
+  var matHandle = sprout.openMat('mat.html');
+  var l = Ladda.create(document.querySelector('#button1'));
+  var spinner = Ladda.create(document.querySelector('#button2'));
+  var spinner1 = Ladda.create(document.querySelector('#button3'));
+  var spinner2 = Ladda.create(document.querySelector('#init'));
+  var objCount = 0;
+  var objName = '';
+  var letters = [];
+  var pieces = [];
+  var onboard = [];
+
+  $(document).ready(function() {
+    $("#capture_error").hide();
+    $("#tracked-heading").hide();
+    $("#button1").hide();
+    $("#button2").hide();
+    $("#button3").hide();
+    $.get('code.txt', function(data, err) {
+      if(data) {
+        $('#code_tracking').text(data);
+      } else {
+        showError("Failed to read text file.")
+      }
+    });
+  });
+
+  function initialize() {
+    spinner2.start();
+    $("#tracked-heading").hide();
+    $('#outline-result').html('');
+    sprout.initializeObjectTracker().then(function() {
+      spinner2.stop();
+      $("#outline-result").html("Object tracking initialized.");
+      $("#button1").show();
+      $('#init').remove();
+    }).fail(function(e) {
+      //error message
+      showError(e.message);
+    })
+  }
+
+  function addImages() {
+    l.start();
+    $("#tracked-heading").hide();
+    $("#capture_error").hide();
+    $('#outline-result').html('');
+    sprout.capture().then(function(id) {   
+      pieces.push($('#letter').val());				
+
+      var r = sprout.addTrainingImages('o'+objCount, id);
+      objCount++;        
+      return r;
+    }).then(function(data) {
+      console.log(data);
+      l.stop();
+      //will return a boolean value to indicate whether or not image was added successfully
+      if(data == true) {
+        $("#button2").show();
+        $("#button3").show();
+      }
+      $('#outline-result').html("Object captured successfully.");
+    }).fail(function(e) {
+      //error message
+      showError(e.message);
+    })
+	}
+
+  function display(data) {
+    onboard = [];
+    responseAnswer = '';
+    
+    for(var i=0; i<data.TrackedObjects.length; i++) {
+      objectId = parseInt(data.TrackedObjects[i].Name.slice(1, - 1));
+
+      onboard[objectId] = [Math.floor(data.TrackedObjects[i].PhysicalBoundaries.Location.X), objectId];
+      onboard.sort(function(a, b) { return a[0] - b[0] });
+    }
+    
+    var o = onboard.slice(0);
+    o.sort(function(a, b) { return a[0] - b[0] });
+    
+    var t = '';
+    for(var k in o)
+    {
+      t += pieces[o[k][1]];
+    }
+    responseAnswer = t;
+    
+    $('#word').text(responseAnswer);
+    
+    spinner.stop();
+  }
+
+  function start() {
+    $("#tracked-heading").hide();
+    spinner.start();
+    $('#outline-result').html('');
+    sprout.startTracking(display).then(function(data) {
+      spinner.stop();
+    }).fail(function(err) {
+      //error message
+			
+      showError(e.message);
+    })
+  }
+
+  function stop() {
+    spinner1.start();
+    sprout.stopTracking();
+    spinner1.stop();
+  }
+
+  function showError(error) {
+    l.stop();
+    spinner.stop();
+    spinner1.stop();
+    spinner2.stop();
+    $("#tracked-heading").hide();
+    $("#outline-result").hide();
+    $("#error_message").html(error);
+    $("#capture_error").show();
+  }
+
+  $("#closeApp").click(function() {
+    matHandle.close();
+    window.close();
+  });
+  
+  initialize();
+  </script>
+</body>
+</html>
+
